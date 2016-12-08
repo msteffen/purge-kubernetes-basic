@@ -1,0 +1,36 @@
+#!/bin/bash
+
+# Kill all pachyderm jobs (besides pachd-init)
+declare -a jobs=( $(kubectl get jobs -l suite=pachyderm -o jsonpath='{range .items[*].metadata.name}{@}{"\n"}{end}') )
+
+# Get k8s master URL
+master_url="$(
+  cluster=$(kubectl config get-contexts "$(kubectl config current-context)" \
+    | tail -n+2 \
+    | awk '{print $3}')
+  link=$(kubectl config view -o jsonpath='{.clusters[?(@.name == "'"${cluster}"'")].cluster.server}')
+    echo -n "${link#https://}"
+)"
+
+for job in "${jobs[@]}"; do
+  echo "job: ${job}"
+  ( curl -X DELETE "${master_url}/apis/batch/v1/namespaces/default/jobs/${job}" 2>&1 | cat >/dev/null & )
+  sleep 0.2
+done
+wait
+
+# Kill all pods that didn't die with their jobs
+declare -a pods
+for job in "${jobs[@]}"; do
+  pods+=( $(
+    kubectl get pods -l suite=pachyderm 2>/dev/null \
+      | grep "${job}" \
+      | awk '{ print $1 }'
+  ) )
+done
+for pod in "${pods[@]}"; do
+  echo "pod: ${pod}"
+  ( curl -X DELETE "${master_url}/apis/batch/v1/namespaces/default/pods/${pod}" 2>&1 | cat >/dev/null & )
+  sleep 0.2
+done
+wait

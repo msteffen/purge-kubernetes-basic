@@ -1,0 +1,43 @@
+#!/bin/bash
+
+# Force user to type password now, since the next step can be slow and we don't
+# want the script to get stuck because the user went to do something else before
+# 'sudo rm -r /tmp/pach'
+sudo touch /dev/null || {
+  echo "Error: must have sudo privileges to run reset_kube"
+  exit 1
+}
+if [[ $# -gt 0 ]] && [[ ${1} == "--hard" ]]; then
+  for i in 1 2; do
+    docker ps -q | xargs docker stop
+  done
+  mount | grep kubelet | grep tmpfs \
+    | awk '{print $3}' \
+    | while read m; do
+        echo "sudo umount ${m}"
+        sudo umount ${m}
+      done
+  # Clean up k8s pod data
+  echo "Cleaning /var/lib/kubelet/pods/"
+  sudo ls /var/lib/kubelet/pods/ \
+    | while read d; do
+        sudo rm -r /var/lib/kubelet/pods/${d}
+      done
+
+  # Clean up all remaining hyperkube procs
+  echo "sudo killall hyperkube"
+  sudo killall hyperkube
+else
+  dir="$( dirname ${BASH_SOURCE} )"
+  "${dir}"/reset_pach
+  kubectl delete jobs -l suite=pachyderm --grace-period=0
+  kubectl delete serviceaccounts -l suite=pachyderm
+  kubectl delete pvc -l suite=pachyderm-pps-storage
+  kubectl delete pv -l suite=pachyderm-pps-storage
+  kubectl delete petsets -l suite=pachyderm
+  kubectl delete all -l suite=pachyderm --grace-period=0
+fi
+
+# Clean up all pachyderm state
+echo "rm -r /var/pachyderm"
+sudo rm -r /var/pachyderm
